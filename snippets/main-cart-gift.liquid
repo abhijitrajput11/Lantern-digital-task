@@ -1,0 +1,249 @@
+{% comment %}
+  Renders a gift dropdown if:
+  - cart has product from 'PremiumCollection' OR
+  - subtotal > $100 (excluding gift-tagged items)
+{% endcomment %}
+
+{%- assign premium_collection_handle = 'premiumcollection' -%}
+{%- assign gift_tag = 'gift' -%}
+
+{%- assign qualifies_by_collection = false -%}
+{%- assign subtotal_excl_gift = 0 -%}
+{%- assign has_gift_in_cart = false -%}
+{%- assign current_gift_id = '' -%}
+
+{%- for item in cart.items -%}
+  {%- assign is_gift = false -%}
+  {%- if item.product.tags contains gift_tag -%}
+    {%- assign is_gift = true -%}
+    {%- assign has_gift_in_cart = true -%}
+    {%- assign current_gift_id = item.variant_id | append: '' -%}
+  {%- endif -%}
+
+  {%- unless is_gift -%}
+    {%- assign subtotal_excl_gift = subtotal_excl_gift | plus: item.final_line_price -%}
+    {%- for collection in item.product.collections -%}
+      {%- if collection.handle == premium_collection_handle -%}
+        {%- assign qualifies_by_collection = true -%}
+      {%- endif -%}
+    {%- endfor -%}
+  {%- endunless -%}
+{%- endfor -%}
+
+{%- assign subtotal_in_dollars = subtotal_excl_gift | divided_by: 100.0 -%}
+{%- assign qualifies_for_gift = false -%}
+{%- if qualifies_by_collection or subtotal_in_dollars > 100 -%}
+  {%- assign qualifies_for_gift = true -%}
+{%- endif -%}
+
+{%- comment -%} Get all gift products {%- endcomment -%}
+{%- assign gift_products = '' -%}
+{%- for product in collections['gifts'].products -%}
+  {%- if product.available and product.tags contains 'gift' -%}
+    {%- assign gift_products = gift_products | append: product.handle -%}
+    {%- unless forloop.last -%}
+      {%- assign gift_products = gift_products | append: ',' -%}
+    {%- endunless -%}
+  {%- endif -%}
+{%- endfor -%}
+
+{%- assign gift_products = gift_products | split: ',' -%}
+
+
+{%- if gift_products.size > 0 -%}
+  <div id="gift-section" class="cart__gift-wrapper" data-section-type="gift-section" data-section-id="{{ section.id }}">
+    {% comment %} {% if has_gift_in_cart %} {% endcomment %}
+      {%- assign current_gift = '' -%}
+      {%- for item in cart.items -%}
+        {%- if item.product.tags contains gift_tag -%}
+          {%- assign current_gift = item -%}
+          {%- break -%}
+        {%- endif -%}
+      {%- endfor -%}
+      
+      <div class="cart__gift-message" style="{% if has_gift_in_cart %}display: block;{% else %}display: none;{% endif %}">
+        <div class="gift-message__content">
+          <span class="gift-icon">🎁</span>
+          <p>Your free gift: <strong>{{ current_gift.product.title }}</strong> has been added to your cart!</p>
+        </div>
+      </div>
+    {% comment %} {% elsif qualifies_for_gift %} {% endcomment %}
+      <div class="cart__gift-selection" style="{% if qualifies_for_gift and has_gift_in_cart == false %}display: block;{% else %}display: none;{% endif %}">
+        <h3 class="h4">🎁 Choose Your Free Gift</h3>
+        <div class="gift-options">
+          <select id="gift-selector" class="select__select" name="gift-selector">
+            <option value="">Select your free gift</option>
+            {%- for gift in collections['gifts'].products -%}
+              <option value="{{ gift.handle }}" data-variant-id="{{ gift.selected_or_first_available_variant.id }}">
+                {{ gift.title }}
+              </option>
+            {%- endfor -%}
+          </select>
+          <button type="button" id="add-gift-btn" class="button button--primary" disabled>
+            Add to Cart
+          </button>
+        </div>
+        <p class="gift-note">You qualify for a free gift with your purchase!</p>
+      </div>
+    {% comment %} {% endif %} {% endcomment %}
+  </div>
+  <style>
+    .cart__gift-wrapper {
+      margin: 2rem 0;
+      padding: 1.5rem;
+      background-color: rgba(245, 243, 241, 0.5);
+      border-radius: 8px;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+    }
+    
+    .cart__gift-message {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    
+    .gift-message__content {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    .gift-icon {
+      font-size: 1.5rem;
+      line-height: 1;
+    }
+    
+    .gift-options {
+      display: flex;
+      gap: 1rem;
+      margin: 1rem 0 0.5rem;
+    }
+    
+    .gift-note {
+      margin: 0.5rem 0 0;
+      font-size: 0.875rem;
+      color: rgba(var(--color-foreground), 0.75);
+    }
+    
+    @media screen and (max-width: 749px) {
+      .gift-options {
+        flex-direction: column;
+      }
+      
+      .gift-options .select__select {
+        width: 100%;
+      }
+      
+      .gift-options .button {
+        width: 100%;
+      }
+    }
+  </style>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const giftSection = document.getElementById('gift-section');
+      if (!giftSection) return;
+
+      // Check if cart qualifies for gift
+      async function checkGiftEligibility() {
+        try {
+          const response = await fetch('/cart.js');
+          const cart = await response.json();
+          
+          // Check for premium products
+          const premiumVariants = window.premiumEligibleVariantIds || [];
+          const hasPremiumProduct = cart.items.some(item => 
+            premiumVariants.includes(item.variant_id)
+          );
+          
+          // Calculate cart total (excluding gifts)
+          const cartTotal = cart.items
+            .filter(item => !(item.properties && item.properties._gift === 'true'))
+            .reduce((total, item) => total + item.final_line_price, 0) / 100;
+            
+          const meetsPriceThreshold = cartTotal >= 100;
+          
+          return { qualifies: hasPremiumProduct || meetsPriceThreshold };
+        } catch (error) {
+          console.error('Error checking gift eligibility:', error);
+          return { qualifies: false, error: error.message };
+        }
+      }
+
+      // Add to cart function
+      async function addGiftToCart(variantId) {
+        try {
+          // First check if cart still qualifies for gift
+          const { qualifies, error } = await checkGiftEligibility();
+          
+          if (!qualifies) {
+            alert('Your cart no longer qualifies for a free gift. Please check your cart and try again.');
+            window.location.reload();
+            return;
+          }
+          
+          // If still qualifies, proceed to add gift
+          const response = await fetch('/cart/add.js', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({
+              id: variantId,
+              quantity: 1,
+              properties: {
+                '_gift': 'true'
+              }
+            })
+          });
+
+          if (response.ok) {
+            window.location.reload();
+          } else {
+            const errorData = await response.json();
+            throw new Error(errorData.description || 'Failed to add gift to cart');
+          }
+        } catch (error) {
+          console.error('Error adding gift to cart:', error);
+          alert(`Error: ${error.message || 'There was an error adding your gift. Please try again.'}`);
+        }
+      }
+
+      // Gift selection handler
+      const giftSelector = document.getElementById('gift-selector');
+      const addGiftBtn = document.getElementById('add-gift-btn');
+      
+      if (giftSelector && addGiftBtn) {
+        giftSelector.addEventListener('change', function() {
+          addGiftBtn.disabled = !this.value;
+        });
+
+        addGiftBtn.addEventListener('click', function() {
+          const selectedOption = giftSelector.options[giftSelector.selectedIndex];
+          const variantId = selectedOption.dataset.variantId;
+          
+          if (variantId) {
+            // Show loading state
+            addGiftBtn.disabled = true;
+            addGiftBtn.textContent = 'Adding...';
+            
+            // Check eligibility before adding
+            checkGiftEligibility().then(({ qualifies, error }) => {
+              if (qualifies) {
+                addGiftToCart(variantId);
+              } else {
+                alert('Your cart does not qualify for a free gift. You need to have a premium product or a cart total of $100 or more.');
+                addGiftBtn.disabled = false;
+                addGiftBtn.textContent = 'Add to Cart';
+              }
+            });
+          }
+        });
+      }
+    });
+  </script>
+{%- endif -%}

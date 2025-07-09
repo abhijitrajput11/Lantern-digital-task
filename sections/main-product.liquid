@@ -671,6 +671,14 @@
     </div>
 
     {% render 'product-media-modal', variant_images: variant_images %}
+    
+    {% if product.tags contains 'gift' %}
+      <script>
+        alert("This product is only available as a free gift.");
+        window.location.href = "/collections/all";
+      </script>
+    {% endif %}
+    
 
     {% assign popups = section.blocks | where: 'type', 'popup' %}
     {%- for block in popups -%}
